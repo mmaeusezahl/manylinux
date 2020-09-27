@@ -117,6 +117,9 @@ rm /usr/local/lib/libsqlite3.a
 # Install libcrypt.so.2
 build_libxcrypt "$LIBXCRYPT_DOWNLOAD_URL" "$LIBXCRYPT_VERSION" "$LIBXCRYPT_HASH"
 
+# Install Cyrus libsasl.so.3
+build_libsasl
+
 # Compile the latest Python releases.
 # (In order to have a proper SSL module, Python is compiled
 # against a recent openssl [see env vars above], which is linked

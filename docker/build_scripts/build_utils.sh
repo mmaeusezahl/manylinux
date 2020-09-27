@@ -200,3 +200,16 @@ function build_patchelf {
     (cd patchelf-$patchelf_version && patch -p1 -i "$src_dir"/patches/patchelf-remove-zeroing.diff && ./bootstrap.sh && do_standard_install)
     rm -rf patchelf.tar.gz patchelf-$patchelf_version
 }
+
+function build_libsasl {
+    check_var ${LIBSASL_DOWNLOAD_URL}
+    check_var ${LIBSASL_VERSION}
+    check_var ${LIBSASL_HASH}
+    local rname="cyrus-sasl-${LIBSASL_VERSION}"
+    local fname="${rname}.tar.gz"
+    curl -fsSLO "${LIBSASL_DOWNLOAD_URL}/${rname}/${fname}"
+    check_sha256sum "${fname}" "${LIBSASL_HASH}"
+    tar xfz "${fname}"
+    (cd "${rname}" && do_standard_install)
+    rm -rf "${fname}" "${rname}"
+}
