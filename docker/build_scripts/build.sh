@@ -49,28 +49,31 @@ sed -i '/^override_install_langs=/d' /etc/yum.conf
 # concerns."
 # Decided not to clean at this point: https://github.com/pypa/manylinux/pull/129
 yum -y update
-yum -y install yum-utils
+yum -y install yum-utils curl
 yum-config-manager --enable extras
+
+if ! which localedef &> /dev/null; then
+    # somebody messed up glibc-common package to squeeze image size, reinstall the package
+    yum -y reinstall glibc-common
+fi
 
 # upgrading glibc-common can end with removal on en_US.UTF-8 locale
 localedef -i en_US -f UTF-8 en_US.UTF-8
 
-DEVTOOLSET8_TOOLCHAIN_DEPS="devtoolset-8-binutils devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran"
-DEFAULT_TOOLCHAIN_DEPS="gcc gcc-c++ gcc-gfortran"
+TOOLCHAIN_DEPS="devtoolset-9-binutils devtoolset-9-gcc devtoolset-9-gcc-c++ devtoolset-9-gcc-gfortran"
 if [ "${AUDITWHEEL_ARCH}" == "x86_64" ]; then
-    # Software collection (for devtoolset-8)
+    # Software collection (for devtoolset-9)
     yum -y install centos-release-scl-rh
     # EPEL support (for yasm)
     yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
     YASM=yasm
-    TOOLCHAIN_DEPS=${DEVTOOLSET8_TOOLCHAIN_DEPS}
 elif [ "${AUDITWHEEL_ARCH}" == "aarch64" ] || [ "${AUDITWHEEL_ARCH}" == "ppc64le" ] || [ "${AUDITWHEEL_ARCH}" == "s390x" ]; then
-    # Software collection (for devtoolset-8)
+    # Software collection (for devtoolset-9)
     yum -y install centos-release-scl-rh
-    TOOLCHAIN_DEPS=${DEVTOOLSET8_TOOLCHAIN_DEPS}
 elif [ "${AUDITWHEEL_ARCH}" == "i686" ]; then
-    # No yasm, no devtoolset-8 on i686
-    TOOLCHAIN_DEPS=${DEFAULT_TOOLCHAIN_DEPS}
+    # No yasm on i686
+    # Install mayeut/devtoolset-9 repo to get devtoolset-9
+    curl -fsSLo /etc/yum.repos.d/mayeut-devtoolset-9.repo https://copr.fedorainfracloud.org/coprs/mayeut/devtoolset-9/repo/custom-1/mayeut-devtoolset-9-custom-1.repo
 fi
 
 # Development tools and libraries
@@ -114,7 +117,7 @@ cd ..
 rm -rf $SQLITE_AUTOCONF_VERSION*
 rm /usr/local/lib/libsqlite3.a
 
-# Install libcrypt.so.2
+# Install libcrypt.so.1 and libcrypt.so.2
 build_libxcrypt "$LIBXCRYPT_DOWNLOAD_URL" "$LIBXCRYPT_VERSION" "$LIBXCRYPT_HASH"
 
 # Install Cyrus libsasl.so.3
@@ -127,26 +130,32 @@ build_libsasl
 mkdir -p /opt/python
 build_cpythons $CPYTHON_VERSIONS
 
-PY37_BIN=/opt/python/cp37-cp37m/bin
+# Create venv for auditwheel & certifi
+TOOLS_PATH=/opt/_internal/tools
+/opt/python/cp37-cp37m/bin/python -m venv $TOOLS_PATH
+source $TOOLS_PATH/bin/activate
 
+# Install default packages
+pip install -U --require-hashes -r $MY_DIR/requirements.txt
 # Install certifi and auditwheel
-$PY37_BIN/pip install --require-hashes -r $MY_DIR/py37-requirements.txt
+pip install -U --require-hashes -r $MY_DIR/requirements-tools.txt
+
+# Make auditwheel available in PATH
+ln -s $TOOLS_PATH/bin/auditwheel /usr/local/bin/auditwheel
 
 # Our openssl doesn't know how to find the system CA trust store
 #   (https://github.com/pypa/manylinux/issues/53)
 # And it's not clear how up-to-date that is anyway
 # So let's just use the same one pip and everyone uses
-ln -s $($PY37_BIN/python -c 'import certifi; print(certifi.where())') \
-      /opt/_internal/certs.pem
-# If you modify this line you also have to modify the versions in the
-# Dockerfiles:
+ln -s $(python -c 'import certifi; print(certifi.where())') /opt/_internal/certs.pem
+# If you modify this line you also have to modify the versions in the Dockerfiles:
 export SSL_CERT_FILE=/opt/_internal/certs.pem
 
+# Deactivate the tools virtual environment
+deactivate
 
 # Install patchelf (latest with unreleased bug fixes) and apply our patches
 build_patchelf $PATCHELF_VERSION $PATCHELF_HASH
-
-ln -s $PY37_BIN/auditwheel /usr/local/bin/auditwheel
 
 # Clean up development headers and other unnecessary stuff for
 # final image

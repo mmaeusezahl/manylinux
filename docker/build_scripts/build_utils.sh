@@ -75,7 +75,7 @@ function build_cpythons {
     # Import public keys used to verify downloaded Python source tarballs.
     # https://www.python.org/static/files/pubkeys.txt
     gpg --import ${MY_DIR}/cpython-pubkeys.txt
-    # Add version 3.8 release manager's key
+    # Add version 3.8, 3.9 release manager's key
     gpg --import ${MY_DIR}/ambv-pubkey.txt
     for py_ver in $@; do
         build_cpython $py_ver
@@ -178,16 +178,28 @@ function build_libxcrypt {
     curl -fsSLO "$LIBXCRYPT_DOWNLOAD_URL"/v"$LIBXCRYPT_VERSION"
     check_sha256sum "v$LIBXCRYPT_VERSION" "$LIBXCRYPT_HASH"
     tar xfz "v$LIBXCRYPT_VERSION"
-    (cd "libxcrypt-$LIBXCRYPT_VERSION" && ./autogen.sh && \
-        do_standard_install \
+    pushd "libxcrypt-$LIBXCRYPT_VERSION"
+    ./autogen.sh > /dev/null
+    do_standard_install \
         --disable-obsolete-api \
         --enable-hashes=all \
-        --disable-werror)
+        --disable-werror
+    # we also need libcrypt.so.1 with glibc compatibility for system libraries
+    # c.f https://github.com/pypa/manylinux/issues/305#issuecomment-625902928
+    make clean > /dev/null
+    sed -r -i 's/XCRYPT_([0-9.])+/-/g;s/(%chain OW_CRYPT_1.0).*/\1/g' lib/libcrypt.map.in
+    DESTDIR=$(pwd)/so.1 do_standard_install \
+        --disable-xcrypt-compat-files \
+        --enable-obsolete-api=glibc \
+        --enable-hashes=all \
+        --disable-werror
+    cp -P ./so.1/usr/local/lib/libcrypt.so.1* /usr/local/lib/
+    popd
     rm -rf "v$LIBXCRYPT_VERSION" "libxcrypt-$LIBXCRYPT_VERSION"
 
     # Delete GLIBC version headers and libraries
     rm -rf /usr/include/crypt.h
-    rm -rf /usr/lib64/libcrypt.a /usr/lib64/libcrypt.so
+    rm -rf /usr/lib*/libcrypt.a /usr/lib*/libcrypt.so /usr/lib*/libcrypt.so.1
 }
 
 function build_patchelf {
@@ -197,7 +209,7 @@ function build_patchelf {
     curl -fsSL -o patchelf.tar.gz https://github.com/NixOS/patchelf/archive/$patchelf_version.tar.gz
     check_sha256sum patchelf.tar.gz $patchelf_hash
     tar -xzf patchelf.tar.gz
-    (cd patchelf-$patchelf_version && patch -p1 -i "$src_dir"/patches/patchelf-remove-zeroing.diff && ./bootstrap.sh && do_standard_install)
+    (cd patchelf-$patchelf_version && ./bootstrap.sh && do_standard_install)
     rm -rf patchelf.tar.gz patchelf-$patchelf_version
 }
 
